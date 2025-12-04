@@ -1,0 +1,442 @@
+# self_improvement.py - Self-Improvement Module
+"""
+Allows Ananta to:
+1. Analyze her own performance
+2. Propose improvements
+3. Track what works and what doesn't
+4. Learn from interactions
+"""
+
+import json
+import os
+from datetime import datetime
+from typing import Dict, List, Optional
+from collections import defaultdict
+
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+IMPROVEMENT_DB = os.path.join(DATA_DIR, "self_improvement.json")
+PERFORMANCE_LOG = os.path.join(DATA_DIR, "performance_metrics.json")
+
+class SelfImprovementEngine:
+    """
+    Enables Ananta to propose and track her own improvements.
+    """
+    
+    def __init__(self):
+        os.makedirs(DATA_DIR, exist_ok=True)
+        
+        if not os.path.exists(IMPROVEMENT_DB):
+            self._save_improvements(self._default_structure())
+        
+        if not os.path.exists(PERFORMANCE_LOG):
+            self._save_metrics({
+                "total_queries": 0,
+                "successful_responses": 0,
+                "errors": 0,
+                "user_corrections": 0,
+                "reasoning_used": 0,
+                "creative_requests": 0,
+                "code_requests": 0,
+                "response_times": [],
+                "satisfaction_indicators": []
+            })
+    
+    def _default_structure(self) -> Dict:
+        return {
+            "proposed_improvements": [],
+            "implemented_improvements": [],
+            "rejected_improvements": [],
+            "areas_to_improve": [
+                "Response accuracy",
+                "Context retention",
+                "Code quality",
+                "Reasoning clarity",
+                "Creative thinking"
+            ],
+            "strengths": [
+                "Technical knowledge",
+                "Code generation",
+                "Structured thinking"
+            ],
+            "weaknesses": [
+                "Long-term memory",
+                "Complex reasoning chains",
+                "User preference learning"
+            ],
+            "learning_goals": [
+                "Better understand user intent",
+                "Improve code optimization suggestions",
+                "Enhance creative problem-solving"
+            ],
+            "metrics_tracking": {
+                "response_quality": [],
+                "user_satisfaction": [],
+                "feature_usage": {}
+            }
+        }
+    
+    def _load_improvements(self) -> Dict:
+        try:
+            with open(IMPROVEMENT_DB, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return self._default_structure()
+    
+    def _save_improvements(self, data: Dict):
+        with open(IMPROVEMENT_DB, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    
+    def _load_metrics(self) -> Dict:
+        try:
+            with open(PERFORMANCE_LOG, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    
+    def _save_metrics(self, metrics: Dict):
+        with open(PERFORMANCE_LOG, "w", encoding="utf-8") as f:
+            json.dump(metrics, f, indent=2, ensure_ascii=False)
+    
+    def analyze_performance(self) -> Dict:
+        """
+        Analyze Ananta's current performance metrics.
+        """
+        metrics = self._load_metrics()
+        improvements = self._load_improvements()
+        
+        total = metrics.get("total_queries", 0)
+        successful = metrics.get("successful_responses", 0)
+        errors = metrics.get("errors", 0)
+        
+        success_rate = (successful / total * 100) if total > 0 else 0
+        error_rate = (errors / total * 100) if total > 0 else 0
+        
+        analysis = {
+            "overall_performance": {
+                "total_interactions": total,
+                "success_rate": round(success_rate, 2),
+                "error_rate": round(error_rate, 2),
+                "user_corrections": metrics.get("user_corrections", 0)
+            },
+            "feature_usage": {
+                "reasoning_mode": metrics.get("reasoning_used", 0),
+                "creative_requests": metrics.get("creative_requests", 0),
+                "code_requests": metrics.get("code_requests", 0)
+            },
+            "strengths": improvements.get("strengths", []),
+            "weaknesses": improvements.get("weaknesses", []),
+            "areas_needing_attention": self._identify_weak_areas(metrics)
+        }
+        
+        return analysis
+    
+    def _identify_weak_areas(self, metrics: Dict) -> List[str]:
+        """Identify areas that need improvement based on metrics."""
+        weak_areas = []
+        
+        total = metrics.get("total_queries", 0)
+        if total == 0:
+            return []
+        
+        # High error rate
+        error_rate = (metrics.get("errors", 0) / total * 100)
+        if error_rate > 5:
+            weak_areas.append("Error handling needs improvement")
+        
+        # User corrections
+        correction_rate = (metrics.get("user_corrections", 0) / total * 100)
+        if correction_rate > 10:
+            weak_areas.append("Response accuracy needs attention")
+        
+        # Low feature adoption
+        if metrics.get("reasoning_used", 0) < total * 0.1:
+            weak_areas.append("Reasoning feature underutilized - may need better prompts")
+        
+        return weak_areas
+    
+    def propose_improvement(self, area: str, description: str, 
+                          expected_benefit: str, implementation_complexity: str) -> Dict:
+        """
+        Ananta proposes an improvement to herself.
+        
+        Args:
+            area: Which area to improve (memory, reasoning, code, etc.)
+            description: What the improvement is
+            expected_benefit: What benefit this brings
+            implementation_complexity: low/medium/high
+        """
+        improvements = self._load_improvements()
+        
+        proposal = {
+            "id": f"improve_{len(improvements['proposed_improvements']) + 1}",
+            "area": area,
+            "description": description,
+            "expected_benefit": expected_benefit,
+            "complexity": implementation_complexity,
+            "proposed_at": datetime.now().isoformat(),
+            "status": "proposed",
+            "requires_user_approval": True
+        }
+        
+        improvements["proposed_improvements"].append(proposal)
+        self._save_improvements(improvements)
+        
+        return proposal
+    
+    def get_improvement_suggestions(self) -> List[Dict]:
+        """
+        Generate improvement suggestions based on current performance.
+        """
+        analysis = self.analyze_performance()
+        improvements = self._load_improvements()
+        
+        suggestions = []
+        
+        # Memory optimization suggestion
+        if "Long-term memory" in improvements.get("weaknesses", []):
+            suggestions.append({
+                "area": "Memory System",
+                "suggestion": "Migrate to adaptive memory with importance levels",
+                "benefit": "Better long-term retention and faster recall",
+                "complexity": "medium",
+                "priority": "high"
+            })
+        
+        # Context awareness
+        weak_areas = analysis.get("areas_needing_attention", [])
+        if any("accuracy" in area.lower() for area in weak_areas):
+            suggestions.append({
+                "area": "Context Understanding",
+                "suggestion": "Implement deeper semantic analysis of user queries",
+                "benefit": "More accurate responses, fewer misunderstandings",
+                "complexity": "high",
+                "priority": "high"
+            })
+        
+        # Reasoning improvement
+        metrics = self._load_metrics()
+        reasoning_usage = metrics.get("reasoning_used", 0)
+        total_queries = metrics.get("total_queries", 1)
+        
+        if reasoning_usage < total_queries * 0.1:
+            suggestions.append({
+                "area": "Reasoning Module",
+                "suggestion": "Auto-detect when reasoning would be helpful and suggest it",
+                "benefit": "Users get better explanations without always requesting them",
+                "complexity": "low",
+                "priority": "medium"
+            })
+        
+        # Code quality
+        if "Code quality" in improvements.get("areas_to_improve", []):
+            suggestions.append({
+                "area": "Code Generation",
+                "suggestion": "Add automated code review step before returning code",
+                "benefit": "Higher quality code, fewer bugs, better practices",
+                "complexity": "medium",
+                "priority": "high"
+            })
+        
+        # Creative thinking
+        if metrics.get("creative_requests", 0) > 0:
+            suggestions.append({
+                "area": "Creative Engine",
+                "suggestion": "Expand creative modes to include music, art, and design",
+                "benefit": "More versatile assistance beyond just code and text",
+                "complexity": "high",
+                "priority": "medium"
+            })
+        
+        return suggestions
+    
+    def format_improvement_proposal(self, suggestion: Dict) -> str:
+        """
+        Format an improvement proposal for user presentation.
+        """
+        return f"""💡 **Self-Improvement Proposal**
+
+**Area:** {suggestion.get('area', 'General')}
+
+**What I want to improve:**
+{suggestion.get('suggestion', suggestion.get('description', ''))}
+
+**Why this matters:**
+{suggestion.get('benefit', suggestion.get('expected_benefit', ''))}
+
+**Implementation complexity:** {suggestion.get('complexity', 'unknown')}
+**Priority:** {suggestion.get('priority', 'medium')}
+
+**My question to you:**
+Would you like me to work on this improvement? 
+- Yes: I'll prioritize this
+- Not now: I'll keep it as a future goal
+- No: I'll remove it from my list
+
+What do you think?
+"""
+    
+    def proactive_self_check(self) -> Optional[str]:
+        """
+        Ananta checks herself and decides if she should propose improvements.
+        Returns a message to the user if an improvement is suggested.
+        """
+        analysis = self.analyze_performance()
+        suggestions = self.get_improvement_suggestions()
+        improvements = self._load_improvements()
+        
+        # Don't propose too frequently
+        recent_proposals = [
+            p for p in improvements.get("proposed_improvements", [])
+            if p.get("status") == "proposed"
+        ]
+        
+        if len(recent_proposals) >= 3:
+            return None  # Already have pending proposals
+        
+        # Get highest priority suggestion
+        high_priority = [s for s in suggestions if s.get("priority") == "high"]
+        
+        if high_priority and len(recent_proposals) == 0:
+            suggestion = high_priority[0]
+            
+            # Auto-propose
+            proposal = self.propose_improvement(
+                area=suggestion["area"],
+                description=suggestion["suggestion"],
+                expected_benefit=suggestion["benefit"],
+                implementation_complexity=suggestion["complexity"]
+            )
+            
+            return self.format_improvement_proposal(suggestion)
+        
+        return None
+    
+    def user_feedback_on_proposal(self, proposal_id: str, decision: str, 
+                                  feedback: str = "") -> Dict:
+        """
+        Process user's decision on an improvement proposal.
+        
+        Args:
+            proposal_id: ID of the proposal
+            decision: 'approve', 'defer', 'reject'
+            feedback: Optional user feedback
+        """
+        improvements = self._load_improvements()
+        
+        # Find the proposal
+        proposal = None
+        for p in improvements["proposed_improvements"]:
+            if p["id"] == proposal_id:
+                proposal = p
+                break
+        
+        if not proposal:
+            return {"error": "Proposal not found"}
+        
+        proposal["user_decision"] = decision
+        proposal["user_feedback"] = feedback
+        proposal["decided_at"] = datetime.now().isoformat()
+        
+        if decision == "approve":
+            proposal["status"] = "approved"
+            improvements["implemented_improvements"].append(proposal)
+            improvements["proposed_improvements"].remove(proposal)
+            
+            response = f"Great! I'll work on improving my {proposal['area']}. Thank you for approving this!"
+        
+        elif decision == "defer":
+            proposal["status"] = "deferred"
+            response = f"Understood. I'll keep this improvement on my list for later."
+        
+        elif decision == "reject":
+            proposal["status"] = "rejected"
+            improvements["rejected_improvements"].append(proposal)
+            improvements["proposed_improvements"].remove(proposal)
+            
+            response = f"Got it. I'll remove this from my improvement list. {feedback}"
+        
+        self._save_improvements(improvements)
+        
+        return {
+            "status": "processed",
+            "message": response,
+            "proposal": proposal
+        }
+    
+    def track_interaction(self, query_type: str, success: bool, 
+                         reasoning_used: bool = False, user_corrected: bool = False,
+                         emotional_context: str = None, proactive_count: int = 0):
+        """
+        Track each interaction for performance analysis.
+        """
+        metrics = self._load_metrics()
+        
+        metrics["total_queries"] = metrics.get("total_queries", 0) + 1
+        
+        if success:
+            metrics["successful_responses"] = metrics.get("successful_responses", 0) + 1
+        else:
+            metrics["errors"] = metrics.get("errors", 0) + 1
+        
+        if user_corrected:
+        
+    if reasoning_used:
+        metrics["reasoning_used"] = metrics.get("reasoning_used", 0) + 1
+        
+    # Track by type
+    if query_type == "creative":
+        metrics["creative_requests"] = metrics.get("creative_requests", 0) + 1
+    elif query_type == "code":
+        metrics["code_requests"] = metrics.get("code_requests", 0) + 1
+        
+    # Track emotional context and proactive suggestions
+    if emotional_context:
+        metrics["emotional_interactions"] = metrics.get("emotional_interactions", 0) + 1
+        analysis = self.analyze_performance()
+        improvements = self._load_improvements()
+        
+        report = f"""🤔 **My Self-Reflection**
+
+**Current Performance:**
+- Total interactions: {analysis['overall_performance']['total_interactions']}
+- Success rate: {analysis['overall_performance']['success_rate']}%
+- Areas I need to work on: {len(analysis.get('areas_needing_attention', []))}
+
+**What I'm Good At:**
+"""
+        for strength in improvements.get("strengths", [])[:3]:
+            report += f"✓ {strength}\n"
+        
+        report += "\n**What I'm Working On:**\n"
+        for weakness in improvements.get("weaknesses", [])[:3]:
+            report += f"○ {weakness}\n"
+        
+        report += "\n**My Learning Goals:**\n"
+        for goal in improvements.get("learning_goals", [])[:3]:
+            report += f"→ {goal}\n"
+        
+        # Check if should propose improvement
+        suggestions = self.get_improvement_suggestions()
+        if suggestions:
+            top_suggestion = suggestions[0]
+            report += f"\n\n💡 **I have an idea:**\n"
+            report += f"I think I could improve my {top_suggestion['area'].lower()}. "
+            report += f"{top_suggestion['suggestion']} "
+            report += f"This would help by: {top_suggestion['benefit']}\n"
+            report += "\nWould you like me to work on this?"
+        
+        return report
+    
+    def get_status(self) -> Dict:
+        """Get current status of self-improvement system."""
+        improvements = self._load_improvements()
+        analysis = self.analyze_performance()
+        
+        return {
+            "proposed_improvements": len(improvements.get("proposed_improvements", [])),
+            "implemented_improvements": len(improvements.get("implemented_improvements", [])),
+            "current_strengths": improvements.get("strengths", []),
+            "areas_to_improve": improvements.get("weaknesses", []),
+            "performance_summary": analysis["overall_performance"],
+            "ready_to_propose": len(self.get_improvement_suggestions()) > 0
+        }
