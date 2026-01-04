@@ -34,6 +34,14 @@ class OllamaClient:
             print(f"   - Memory Mapping: {self.gpu_settings['use_mmap']}")
             print(f"   - Memory Lock: {self.gpu_settings['use_mlock']}")
 
+        # Initialize persistent session for connection pooling
+        self.session = requests.Session()
+        self.session.headers.update({
+            'Connection': 'keep-alive',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        })
+
     def generate_with_system(
         self, 
         system_prompt: str, 
@@ -60,7 +68,7 @@ class OllamaClient:
                 "repeat_penalty": self.gpu_settings["repeat_penalty"],
             }
             
-            resp = requests.post(
+            resp = self.session.post(
                 self.chat_url,
                 json={
                     "model": self.model,
@@ -109,7 +117,7 @@ class OllamaClient:
             retries = 3
             for attempt in range(retries):
                 try:
-                    resp = requests.post(
+                    resp = self.session.post(
                         self.generate_url,
                         json={
                             "model": self.model,
@@ -167,7 +175,7 @@ class OllamaClient:
                 {"role": "user", "content": user_message}
             ]
             
-            resp = requests.post(
+            resp = self.session.post(
                 self.chat_url,
                 json={
                     "model": self.model,
@@ -207,15 +215,15 @@ class OllamaClient:
                 max_tokens = min(max(max_tokens, 256), 1024)
                 
             # Configure keepalive and chunk size for smoother streaming
-            session = requests.Session()
-            session.headers.update({
+            headers = {
                 'Connection': 'keep-alive',
                 'Accept': 'text/event-stream',
                 'Cache-Control': 'no-cache'
-            })
+            }
             
-            resp = session.post(
+            resp = self.session.post(
                 self.generate_url,
+                headers=headers,
                 json={
                     "model": self.model,
                     "prompt": prompt,
@@ -257,8 +265,6 @@ class OllamaClient:
 
         except Exception as e:
             yield f"ERROR: {e}"
-        finally:
-            session.close()
     
     def chat(
         self,
@@ -267,7 +273,7 @@ class OllamaClient:
         temperature: float = 0.3
     ) -> str:
         try:
-            resp = requests.post(
+            resp = self.session.post(
                 self.chat_url,
                 json={
                     "model": self.model,
