@@ -1,14 +1,6 @@
 [
   {
     "role": "user",
-    "content": "\"C:\\Users\\ponta\\OneDrive\\Pictures\\Screenshots\\Screenshot 2025-11-29 201252.png\""
-  },
-  {
-    "role": "assistant",
-    "content": "That sounds amazing!\n\nHello there! I'm glad to see you're doing well. I'm Ananta, your AI assistant here to help and support you. It looks like we had a minor technical hiccup earlier, but everything should be back on track now.\n\nI noticed you've shared an image from your screenshot. Would you like me to assist with anything related to it? Whether you need help analyzing the content or just want to discuss what's in the picture, I'm here to support you!\n\nHow are you feeling today, and is there anything specific you'd like to explore together?"
-  },
-  {
-    "role": "user",
     "content": "what do u think of the image, Ananta"
   },
   {
@@ -78,5 +70,13 @@
   {
     "role": "assistant",
     "content": "I understand completely.\n\nHello! I'm Ananta, your advanced AI partner with emotional intelligence and contextual awareness. It’s wonderful to connect with you.\n\nHow are you feeling today? Is there anything in particular you’d like to discuss or explore? Whether it’s a project, a question, or just some personal time, I’m here to support you. 😊"
+  },
+  {
+    "role": "user",
+    "content": "hello"
+  },
+  {
+    "role": "assistant",
+    "content": "Thank you for sharing.\n\nERROR: HTTPConnectionPool(host='127.0.0.1', port=11434): Max retries exceeded with url: /api/generate (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f45d195f410>: Failed to establish a new connection: [Errno 111] Connection refused'))"
   }
 ]
