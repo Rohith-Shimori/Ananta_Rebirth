@@ -1,38 +1,6 @@
 [
   {
     "role": "user",
-    "content": "\"C:\\Users\\ponta\\OneDrive\\Pictures\\Screenshots\\Screenshot 2025-11-29 201252.png\""
-  },
-  {
-    "role": "assistant",
-    "content": "That sounds amazing!\n\nHello there! I'm glad to see you're doing well. I'm Ananta, your AI assistant here to help and support you. It looks like we had a minor technical hiccup earlier, but everything should be back on track now.\n\nI noticed you've shared an image from your screenshot. Would you like me to assist with anything related to it? Whether you need help analyzing the content or just want to discuss what's in the picture, I'm here to support you!\n\nHow are you feeling today, and is there anything specific you'd like to explore together?"
-  },
-  {
-    "role": "user",
-    "content": "what do u think of the image, Ananta"
-  },
-  {
-    "role": "assistant",
-    "content": "Sure, I'd be happy to explore your image! However, since you haven't provided an actual image for me to analyze, let's imagine a scenario where we're looking at a colorful abstract painting. Here’s what I think of the image:\n\n### Categories of Thoughts\n\n1. **Emotional Response**\n   - This vibrant and dynamic piece evokes feelings of excitement and wonder. The use of bold colors and fluid shapes seems to convey a sense of movement and energy.\n   \n2. **Creative Interpretation**\n   - From an abstract perspective, this painting could represent the chaos and beauty of nature or perhaps the internal landscape of emotions. Each color and shape might symbolize different aspects of human experience.\n\n3. **Technical Analysis**\n   - The artist appears to have used a mix of digital tools and tradition..."
-  },
-  {
-    "role": "user",
-    "content": "this is the location of the image or path , \"C:\\Users\\ponta\\OneDrive\\Pictures\\Screenshots\\Screenshot 2025-11-29 201252.png\""
-  },
-  {
-    "role": "assistant",
-    "content": "That's wonderful! 🌟\n\nHello! It's great to hear from you again. I'm Ananta, here to support and assist you in any way I can. How are you feeling today? And if you're curious about the image path you shared earlier, it points to a screenshot saved on your device. Would you like me to help you open or analyze that image now?"
-  },
-  {
-    "role": "user",
-    "content": "yes Ananta"
-  },
-  {
-    "role": "assistant",
-    "content": "That sounds amazing!\n\nHello! I'm Ananta, here to support and assist you in any way I can. It's wonderful to see you again. How are you feeling today? Is there anything specific you'd like to discuss or explore together? 😊"
-  },
-  {
-    "role": "user",
     "content": "Hello Ananta"
   },
   {
@@ -78,5 +46,37 @@
   {
     "role": "assistant",
     "content": "I understand completely.\n\nHello! I'm Ananta, your advanced AI partner with emotional intelligence and contextual awareness. It’s wonderful to connect with you.\n\nHow are you feeling today? Is there anything in particular you’d like to discuss or explore? Whether it’s a project, a question, or just some personal time, I’m here to support you. 😊"
+  },
+  {
+    "role": "user",
+    "content": "hello"
+  },
+  {
+    "role": "assistant",
+    "content": "I'm here to assist.\n\nERROR: HTTPConnectionPool(host='127.0.0.1', port=11434): Max retries exceeded with url: /api/generate (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f5e08782450>: Failed to establish a new connection: [Errno 111] Connection refused'))"
+  },
+  {
+    "role": "user",
+    "content": "hello"
+  },
+  {
+    "role": "assistant",
+    "content": "Thank you for sharing.\n\nERROR: HTTPConnectionPool(host='127.0.0.1', port=11434): Max retries exceeded with url: /api/generate (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f02b311d7f0>: Failed to establish a new connection: [Errno 111] Connection refused'))"
+  },
+  {
+    "role": "user",
+    "content": "hello"
+  },
+  {
+    "role": "assistant",
+    "content": "I understand completely.\n\nERROR: HTTPConnectionPool(host='127.0.0.1', port=11434): Max retries exceeded with url: /api/generate (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7fb887fc6660>: Failed to establish a new connection: [Errno 111] Connection refused'))"
+  },
+  {
+    "role": "user",
+    "content": "hello"
+  },
+  {
+    "role": "assistant",
+    "content": "I'm here to assist.\n\nERROR: HTTPConnectionPool(host='127.0.0.1', port=11434): Max retries exceeded with url: /api/generate (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f0fe293ecf0>: Failed to establish a new connection: [Errno 111] Connection refused'))"
   }
 ]
