@@ -75,6 +75,9 @@ class HNSWIndex:
         self.graph = {}  # Simplified graph structure
         self.data = {}   # Vector data
         self.metadata = {}  # Associated metadata
+        # Cache for vectorized search
+        self._matrix_cache = None
+        self._id_list_cache = None
     
     def add(self, idx: int, vector: np.ndarray, metadata: Dict = None):
         """Add vector to index"""
@@ -82,24 +85,60 @@ class HNSWIndex:
         self.data[idx] = vector
         if metadata:
             self.metadata[idx] = metadata
+        # Invalidate cache
+        self._matrix_cache = None
+        self._id_list_cache = None
     
     def search(self, query_vector: np.ndarray, k: int = 5) -> List[Tuple[int, float]]:
-        """Search for k nearest neighbors"""
-        if not self.data:
+        """Search for k nearest neighbors using vectorized operations"""
+        if not self.data or k <= 0:
             return []
         
-        # Compute distances to all vectors
-        distances = []
-        for idx, vector in self.data.items():
-            # Cosine distance
-            dist = 1 - np.dot(query_vector, vector) / (
-                np.linalg.norm(query_vector) * np.linalg.norm(vector) + 1e-8
-            )
-            distances.append((idx, dist))
+        # Build cache if needed
+        if self._matrix_cache is None:
+            self._id_list_cache = list(self.data.keys())
+            # Stack vectors into a matrix (N, D)
+            matrix = np.array(list(self.data.values()), dtype=np.float32)
+
+            # Normalize vectors in the matrix for cosine similarity
+            # Compute L2 norm for each row
+            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+            # Avoid division by zero
+            norms[norms == 0] = 1e-8
+            self._matrix_cache = matrix / norms
+
+        # Normalize query if not already
+        query_norm = np.linalg.norm(query_vector)
+        if query_norm > 1e-8:
+            q_vec = query_vector / query_norm
+        else:
+            q_vec = query_vector
+
+        # Compute dot products: (N, D) @ (D,) -> (N,)
+        # Note: We assume stored vectors are already normalized
+        similarities = np.dot(self._matrix_cache, q_vec)
         
-        # Sort by distance and return top k
-        distances.sort(key=lambda x: x[1])
-        return distances[:k]
+        # Get indices of top k highest similarities (smallest distances)
+        # Use argpartition for O(N) selection instead of O(N log N) sort
+        n = len(similarities)
+        if n <= k:
+            top_indices = np.argsort(similarities)[::-1]
+        else:
+            # Partition so that top k are at the end
+            partitioned_indices = np.argpartition(similarities, -k)[-k:]
+            # Sort the top k
+            sorted_top_k = partitioned_indices[np.argsort(similarities[partitioned_indices])[::-1]]
+            top_indices = sorted_top_k
+
+        results = []
+        for i in top_indices:
+            idx = self._id_list_cache[i]
+            dist = 1.0 - similarities[i]
+            # Clamp to 0 to avoid negative distances due to float precision
+            if dist < 0: dist = 0.0
+            results.append((idx, float(dist)))
+
+        return results
 
 
 class LightweightVectorDB:
