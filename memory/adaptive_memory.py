@@ -26,12 +26,13 @@ class AdaptiveMemory:
     def __init__(self):
         os.makedirs(DATA_DIR, exist_ok=True)
         self.db_path = MEMORY_DB
+        # Use a persistent connection to avoid overhead of opening/closing on every call
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._init_database()
     
     def _init_database(self):
         """Initialize database schema."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         # Main memories table
         cursor.execute("""
@@ -83,8 +84,7 @@ class AdaptiveMemory:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_type ON memories(memory_type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_facts_category ON facts(category)")
         
-        conn.commit()
-        conn.close()
+        self.conn.commit()
     
     def add_memory(self, role: str, content: str, memory_type: str = "conversation",
                    importance: int = 5, tags: List[str] = None, metadata: Dict = None) -> str:
@@ -102,8 +102,7 @@ class AdaptiveMemory:
         Returns:
             Memory ID
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         memory_id = str(uuid.uuid4())
         timestamp = datetime.now().timestamp()
@@ -124,8 +123,7 @@ class AdaptiveMemory:
             json.dumps(metadata or {})
         ))
         
-        conn.commit()
-        conn.close()
+        self.conn.commit()
         
         return memory_id
     
@@ -133,8 +131,7 @@ class AdaptiveMemory:
         """
         Retrieve memories above a certain importance threshold.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute("""
             SELECT id, role, content, memory_type, importance, timestamp, 
@@ -159,15 +156,13 @@ class AdaptiveMemory:
                 "metadata": json.loads(row[8]) if row[8] else {}
             })
         
-        conn.close()
         return memories
     
     def get_recent_memories(self, limit: int = 10, memory_type: Optional[str] = None) -> List[Dict]:
         """
         Get recent memories, optionally filtered by type.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         if memory_type:
             cursor.execute("""
@@ -196,13 +191,11 @@ class AdaptiveMemory:
                 "timestamp": row[5]
             })
         
-        conn.close()
         return memories
     
     def update_importance(self, memory_id: str, new_importance: int):
         """Update the importance level of a memory."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute("""
             UPDATE memories
@@ -210,16 +203,14 @@ class AdaptiveMemory:
             WHERE id = ?
         """, (min(10, max(1, new_importance)), memory_id))
         
-        conn.commit()
-        conn.close()
+        self.conn.commit()
     
     def access_memory(self, memory_id: str):
         """
         Mark a memory as accessed (updates last_accessed and access_count).
         Frequently accessed memories maintain higher importance.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute("""
             UPDATE memories
@@ -228,8 +219,7 @@ class AdaptiveMemory:
             WHERE id = ?
         """, (datetime.now().timestamp(), memory_id))
         
-        conn.commit()
-        conn.close()
+        self.conn.commit()
     
     def decay_memories(self, decay_rate: float = 0.95):
         """
@@ -237,8 +227,7 @@ class AdaptiveMemory:
         Reduces importance of old, unaccessed memories.
         Should be called periodically (e.g., daily).
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         # Decay factor reduces over time, but frequently accessed memories decay slower
         cursor.execute("""
@@ -247,16 +236,14 @@ class AdaptiveMemory:
             WHERE access_count < 3
         """, (decay_rate,))
         
-        conn.commit()
-        conn.close()
+        self.conn.commit()
     
     def store_fact(self, category: str, value: str, importance: int = 7, 
                    confidence: float = 1.0, source: str = "user") -> str:
         """
         Store a structured fact with importance.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         fact_id = str(uuid.uuid4())
         timestamp = datetime.now().timestamp()
@@ -280,15 +267,13 @@ class AdaptiveMemory:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (fact_id, category, value, importance, confidence, source, timestamp, timestamp))
         
-        conn.commit()
-        conn.close()
+        self.conn.commit()
         
         return fact_id
     
     def get_fact(self, category: str) -> Optional[Dict]:
         """Retrieve a fact by category."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute("""
             SELECT id, category, value, importance, confidence, source, timestamp
@@ -297,7 +282,6 @@ class AdaptiveMemory:
         """, (category,))
         
         row = cursor.fetchone()
-        conn.close()
         
         if row:
             return {
@@ -313,8 +297,7 @@ class AdaptiveMemory:
     
     def get_all_facts(self, min_importance: int = 1) -> List[Dict]:
         """Get all facts above a certain importance."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute("""
             SELECT category, value, importance, confidence
@@ -332,7 +315,6 @@ class AdaptiveMemory:
                 "confidence": row[3]
             })
         
-        conn.close()
         return facts
     
     def search_memories(self, query: str, limit: int = 5) -> List[Dict]:
@@ -340,8 +322,7 @@ class AdaptiveMemory:
         Simple text search in memories.
         (For better semantic search, use with embeddings separately)
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute("""
             SELECT id, role, content, memory_type, importance, timestamp
@@ -362,7 +343,6 @@ class AdaptiveMemory:
                 "timestamp": row[5]
             })
         
-        conn.close()
         return memories
     
     def create_relationship(self, memory_id_1: str, memory_id_2: str, 
@@ -371,8 +351,7 @@ class AdaptiveMemory:
         Create a relationship between two memories.
         Useful for building knowledge graphs.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         rel_id = str(uuid.uuid4())
         
@@ -381,15 +360,13 @@ class AdaptiveMemory:
             VALUES (?, ?, ?, ?, ?)
         """, (rel_id, memory_id_1, memory_id_2, relationship_type, strength))
         
-        conn.commit()
-        conn.close()
+        self.conn.commit()
         
         return rel_id
     
     def get_related_memories(self, memory_id: str) -> List[Dict]:
         """Get all memories related to a given memory."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute("""
             SELECT m.id, m.content, m.importance, r.relationship_type, r.strength
@@ -409,13 +386,11 @@ class AdaptiveMemory:
                 "strength": row[4]
             })
         
-        conn.close()
         return related
     
     def get_statistics(self) -> Dict:
         """Get memory system statistics."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         # Count memories by type
         cursor.execute("SELECT memory_type, COUNT(*) FROM memories GROUP BY memory_type")
@@ -433,8 +408,6 @@ class AdaptiveMemory:
         cursor.execute("SELECT COUNT(*) FROM memories WHERE importance >= 8")
         critical_count = cursor.fetchone()[0]
         
-        conn.close()
-        
         return {
             "total_memories": sum(type_counts.values()),
             "memories_by_type": type_counts,
@@ -445,8 +418,7 @@ class AdaptiveMemory:
     
     def clear_low_importance(self, threshold: int = 3):
         """Remove memories below importance threshold (cleanup)."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute("""
             DELETE FROM memories
@@ -454,15 +426,13 @@ class AdaptiveMemory:
         """, (threshold,))
         
         deleted = cursor.rowcount
-        conn.commit()
-        conn.close()
+        self.conn.commit()
         
         return deleted
 
     def clear_personal(self) -> Dict:
         """Clear personal facts and any personal-type memories."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
 
         # Clear structured facts
         cursor.execute("DELETE FROM facts")
@@ -475,8 +445,7 @@ class AdaptiveMemory:
         )
         memories_deleted = cursor.rowcount
 
-        conn.commit()
-        conn.close()
+        self.conn.commit()
 
         return {
             "cleared_facts": facts_deleted if facts_deleted is not None else 0,
@@ -485,8 +454,7 @@ class AdaptiveMemory:
 
     def clear_conversation(self) -> int:
         """Clear conversation-type memories (chat history)."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
 
         cursor.execute(
             "DELETE FROM memories WHERE memory_type = ?",
@@ -494,7 +462,20 @@ class AdaptiveMemory:
         )
         deleted = cursor.rowcount or 0
 
-        conn.commit()
-        conn.close()
+        self.conn.commit()
 
         return deleted
+
+    def close(self):
+        """Close the database connection explicitly."""
+        if self.conn:
+            self.conn.close()
+            self.conn = None
+
+    def __del__(self):
+        """Safety net to close connection."""
+        if hasattr(self, 'conn') and self.conn:
+            try:
+                self.conn.close()
+            except Exception:
+                pass
