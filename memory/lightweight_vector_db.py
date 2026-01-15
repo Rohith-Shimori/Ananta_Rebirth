@@ -75,6 +75,10 @@ class HNSWIndex:
         self.graph = {}  # Simplified graph structure
         self.data = {}   # Vector data
         self.metadata = {}  # Associated metadata
+        # Cache for vectorized search
+        self.matrix_cache = None
+        self.ids_cache = None
+        self.dirty = False
     
     def add(self, idx: int, vector: np.ndarray, metadata: Dict = None):
         """Add vector to index"""
@@ -82,24 +86,62 @@ class HNSWIndex:
         self.data[idx] = vector
         if metadata:
             self.metadata[idx] = metadata
+        self.dirty = True
     
     def search(self, query_vector: np.ndarray, k: int = 5) -> List[Tuple[int, float]]:
         """Search for k nearest neighbors"""
         if not self.data:
             return []
         
-        # Compute distances to all vectors
-        distances = []
-        for idx, vector in self.data.items():
-            # Cosine distance
-            dist = 1 - np.dot(query_vector, vector) / (
-                np.linalg.norm(query_vector) * np.linalg.norm(vector) + 1e-8
-            )
-            distances.append((idx, dist))
+        # Optimize: Use matrix multiplication if possible
+        if self.dirty or self.matrix_cache is None:
+            # Rebuild cache
+            self.ids_cache = list(self.data.keys())
+            # Stack vectors: (N, D)
+            matrix = np.stack([self.data[i] for i in self.ids_cache])
+
+            # Normalize matrix rows for correct cosine similarity
+            # norms: (N, 1)
+            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+            # Avoid division by zero
+            norms[norms < 1e-8] = 1.0
+
+            self.matrix_cache = matrix / norms
+            self.dirty = False
+
+        # Vectorized cosine distance
+        # vectors are normalized in cache, query is normalized here
+
+        # Ensure query is normalized
+        q_norm = np.linalg.norm(query_vector)
+        if q_norm > 1e-8:
+            query_vector = query_vector / q_norm
+
+        # Matrix multiplication: (N, D) @ (D,) -> (N,)
+        similarities = self.matrix_cache @ query_vector
+
+        # Convert to distances (1 - sim)
+        dists = 1.0 - similarities
         
-        # Sort by distance and return top k
-        distances.sort(key=lambda x: x[1])
-        return distances[:k]
+        # Get top k indices
+        if k >= len(dists):
+            # Sort all
+            indices = np.argsort(dists)
+            top_indices = indices
+        else:
+            # partial sort for top k using argpartition (much faster for large N)
+            top_indices = np.argpartition(dists, k)[:k]
+            # sort only the top k
+            top_indices = top_indices[np.argsort(dists[top_indices])]
+
+        # Result
+        results = []
+        for i in top_indices:
+            idx = self.ids_cache[i]
+            dist = float(dists[i])
+            results.append((idx, dist))
+
+        return results
 
 
 class LightweightVectorDB:
@@ -268,36 +310,31 @@ class LightweightVectorDB:
 
 # Example usage
 if __name__ == "__main__":
-    import asyncio
+    db = LightweightVectorDB()
     
-    async def main():
-        db = LightweightVectorDB()
-        
-        print("🚀 LIGHTWEIGHT VECTOR DATABASE - TEST\n")
-        
-        # Test documents
-        documents = [
-            ("Python is a programming language", {"category": "programming", "importance": 8}),
-            ("Machine learning is a subset of AI", {"category": "ai", "importance": 9}),
-            ("Neural networks are inspired by biology", {"category": "ai", "importance": 7}),
-            ("Data science involves statistics", {"category": "data", "importance": 6}),
-            ("Web development uses HTML and CSS", {"category": "web", "importance": 5}),
-        ]
-        
-        print("📝 STORING DOCUMENTS:")
-        for text, metadata in documents:
-            vector_id = await db.store_and_index(text, metadata)
-            print(f"  [{vector_id}] {text[:40]}...")
-        
-        # Test search
-        print("\n🔍 SEARCHING:")
-        query = "programming languages"
-        results = await db.search(query, k=3)
-        print(f"Query: '{query}'")
-        for result in results:
-            print(f"  Distance: {result['distance']:.3f} | {result['metadata']}")
-        
-        # Print stats
-        db.print_stats()
+    print("🚀 LIGHTWEIGHT VECTOR DATABASE - TEST\n")
+
+    # Test documents
+    documents = [
+        ("Python is a programming language", {"category": "programming", "importance": 8}),
+        ("Machine learning is a subset of AI", {"category": "ai", "importance": 9}),
+        ("Neural networks are inspired by biology", {"category": "ai", "importance": 7}),
+        ("Data science involves statistics", {"category": "data", "importance": 6}),
+        ("Web development uses HTML and CSS", {"category": "web", "importance": 5}),
+    ]
+
+    print("📝 STORING DOCUMENTS:")
+    for text, metadata in documents:
+        vector_id = db.store_and_index(text, metadata)
+        print(f"  [{vector_id}] {text[:40]}...")
+
+    # Test search
+    print("\n🔍 SEARCHING:")
+    query = "programming languages"
+    results = db.search(query, k=3)
+    print(f"Query: '{query}'")
+    for result in results:
+        print(f"  Distance: {result['distance']:.3f} | {result['metadata']}")
     
-    asyncio.run(main())
+    # Print stats
+    db.print_stats()
