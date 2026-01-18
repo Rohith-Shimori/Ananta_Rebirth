@@ -7,6 +7,7 @@ Replaces simple JSON lists with scalable, queryable storage.
 import sqlite3
 import json
 import os
+import threading
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 import uuid
@@ -26,11 +27,28 @@ class AdaptiveMemory:
     def __init__(self):
         os.makedirs(DATA_DIR, exist_ok=True)
         self.db_path = MEMORY_DB
+        self.conn = None
+        self.lock = threading.RLock()
         self._init_database()
     
+    def _get_conn(self):
+        """Get or create a persistent database connection."""
+        if self.conn is None:
+            self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            # Enable WAL mode for better performance
+            self.conn.execute("PRAGMA journal_mode=WAL;")
+            self.conn.execute("PRAGMA synchronous=NORMAL;")
+        return self.conn
+
+    def close(self):
+        """Close the database connection."""
+        if self.conn:
+            self.conn.close()
+            self.conn = None
+
     def _init_database(self):
         """Initialize database schema."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         cursor = conn.cursor()
         
         # Main memories table
@@ -84,7 +102,6 @@ class AdaptiveMemory:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_facts_category ON facts(category)")
         
         conn.commit()
-        conn.close()
     
     def add_memory(self, role: str, content: str, memory_type: str = "conversation",
                    importance: int = 5, tags: List[str] = None, metadata: Dict = None) -> str:
@@ -102,134 +119,134 @@ class AdaptiveMemory:
         Returns:
             Memory ID
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        memory_id = str(uuid.uuid4())
-        timestamp = datetime.now().timestamp()
-        
-        cursor.execute("""
-            INSERT INTO memories (id, role, content, memory_type, importance, 
-                                 timestamp, last_accessed, tags, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            memory_id,
-            role,
-            content,
-            memory_type,
-            min(10, max(1, importance)),  # Clamp 1-10
-            timestamp,
-            timestamp,
-            json.dumps(tags or []),
-            json.dumps(metadata or {})
-        ))
-        
-        conn.commit()
-        conn.close()
-        
-        return memory_id
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+
+            memory_id = str(uuid.uuid4())
+            timestamp = datetime.now().timestamp()
+
+            cursor.execute("""
+                INSERT INTO memories (id, role, content, memory_type, importance,
+                                     timestamp, last_accessed, tags, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                memory_id,
+                role,
+                content,
+                memory_type,
+                min(10, max(1, importance)),  # Clamp 1-10
+                timestamp,
+                timestamp,
+                json.dumps(tags or []),
+                json.dumps(metadata or {})
+            ))
+
+            conn.commit()
+
+            return memory_id
     
     def get_important_memories(self, min_importance: int = 7, limit: int = 10) -> List[Dict]:
         """
         Retrieve memories above a certain importance threshold.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT id, role, content, memory_type, importance, timestamp, 
-                   access_count, tags, metadata
-            FROM memories
-            WHERE importance >= ? AND decay_factor > 0.3
-            ORDER BY importance DESC, timestamp DESC
-            LIMIT ?
-        """, (min_importance, limit))
-        
-        memories = []
-        for row in cursor.fetchall():
-            memories.append({
-                "id": row[0],
-                "role": row[1],
-                "content": row[2],
-                "type": row[3],
-                "importance": row[4],
-                "timestamp": row[5],
-                "access_count": row[6],
-                "tags": json.loads(row[7]) if row[7] else [],
-                "metadata": json.loads(row[8]) if row[8] else {}
-            })
-        
-        conn.close()
-        return memories
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT id, role, content, memory_type, importance, timestamp,
+                       access_count, tags, metadata
+                FROM memories
+                WHERE importance >= ? AND decay_factor > 0.3
+                ORDER BY importance DESC, timestamp DESC
+                LIMIT ?
+            """, (min_importance, limit))
+
+            memories = []
+            for row in cursor.fetchall():
+                memories.append({
+                    "id": row[0],
+                    "role": row[1],
+                    "content": row[2],
+                    "type": row[3],
+                    "importance": row[4],
+                    "timestamp": row[5],
+                    "access_count": row[6],
+                    "tags": json.loads(row[7]) if row[7] else [],
+                    "metadata": json.loads(row[8]) if row[8] else {}
+                })
+
+            return memories
     
     def get_recent_memories(self, limit: int = 10, memory_type: Optional[str] = None) -> List[Dict]:
         """
         Get recent memories, optionally filtered by type.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        if memory_type:
-            cursor.execute("""
-                SELECT id, role, content, memory_type, importance, timestamp
-                FROM memories
-                WHERE memory_type = ?
-                ORDER BY timestamp DESC
-                LIMIT ?
-            """, (memory_type, limit))
-        else:
-            cursor.execute("""
-                SELECT id, role, content, memory_type, importance, timestamp
-                FROM memories
-                ORDER BY timestamp DESC
-                LIMIT ?
-            """, (limit,))
-        
-        memories = []
-        for row in cursor.fetchall():
-            memories.append({
-                "id": row[0],
-                "role": row[1],
-                "content": row[2],
-                "type": row[3],
-                "importance": row[4],
-                "timestamp": row[5]
-            })
-        
-        conn.close()
-        return memories
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+
+            if memory_type:
+                cursor.execute("""
+                    SELECT id, role, content, memory_type, importance, timestamp
+                    FROM memories
+                    WHERE memory_type = ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """, (memory_type, limit))
+            else:
+                cursor.execute("""
+                    SELECT id, role, content, memory_type, importance, timestamp
+                    FROM memories
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """, (limit,))
+
+            memories = []
+            for row in cursor.fetchall():
+                memories.append({
+                    "id": row[0],
+                    "role": row[1],
+                    "content": row[2],
+                    "type": row[3],
+                    "importance": row[4],
+                    "timestamp": row[5]
+                })
+
+            return memories
     
     def update_importance(self, memory_id: str, new_importance: int):
         """Update the importance level of a memory."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            UPDATE memories
-            SET importance = ?
-            WHERE id = ?
-        """, (min(10, max(1, new_importance)), memory_id))
-        
-        conn.commit()
-        conn.close()
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                UPDATE memories
+                SET importance = ?
+                WHERE id = ?
+            """, (min(10, max(1, new_importance)), memory_id))
+
+            conn.commit()
     
     def access_memory(self, memory_id: str):
         """
         Mark a memory as accessed (updates last_accessed and access_count).
         Frequently accessed memories maintain higher importance.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            UPDATE memories
-            SET last_accessed = ?,
-                access_count = access_count + 1
-            WHERE id = ?
-        """, (datetime.now().timestamp(), memory_id))
-        
-        conn.commit()
-        conn.close()
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                UPDATE memories
+                SET last_accessed = ?,
+                    access_count = access_count + 1
+                WHERE id = ?
+            """, (datetime.now().timestamp(), memory_id))
+
+            conn.commit()
     
     def decay_memories(self, decay_rate: float = 0.95):
         """
@@ -237,133 +254,133 @@ class AdaptiveMemory:
         Reduces importance of old, unaccessed memories.
         Should be called periodically (e.g., daily).
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Decay factor reduces over time, but frequently accessed memories decay slower
-        cursor.execute("""
-            UPDATE memories
-            SET decay_factor = decay_factor * ?
-            WHERE access_count < 3
-        """, (decay_rate,))
-        
-        conn.commit()
-        conn.close()
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+
+            # Decay factor reduces over time, but frequently accessed memories decay slower
+            cursor.execute("""
+                UPDATE memories
+                SET decay_factor = decay_factor * ?
+                WHERE access_count < 3
+            """, (decay_rate,))
+
+            conn.commit()
     
     def store_fact(self, category: str, value: str, importance: int = 7, 
                    confidence: float = 1.0, source: str = "user") -> str:
         """
         Store a structured fact with importance.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        fact_id = str(uuid.uuid4())
-        timestamp = datetime.now().timestamp()
-        
-        # Check if fact already exists, update if so
-        cursor.execute("SELECT id FROM facts WHERE category = ?", (category,))
-        existing = cursor.fetchone()
-        
-        if existing:
-            cursor.execute("""
-                UPDATE facts
-                SET value = ?, importance = ?, confidence = ?, 
-                    last_updated = ?, source = ?
-                WHERE category = ?
-            """, (value, importance, confidence, timestamp, source, category))
-            fact_id = existing[0]
-        else:
-            cursor.execute("""
-                INSERT INTO facts (id, category, value, importance, confidence, 
-                                  source, timestamp, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (fact_id, category, value, importance, confidence, source, timestamp, timestamp))
-        
-        conn.commit()
-        conn.close()
-        
-        return fact_id
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+
+            fact_id = str(uuid.uuid4())
+            timestamp = datetime.now().timestamp()
+
+            # Check if fact already exists, update if so
+            cursor.execute("SELECT id FROM facts WHERE category = ?", (category,))
+            existing = cursor.fetchone()
+
+            if existing:
+                cursor.execute("""
+                    UPDATE facts
+                    SET value = ?, importance = ?, confidence = ?,
+                        last_updated = ?, source = ?
+                    WHERE category = ?
+                """, (value, importance, confidence, timestamp, source, category))
+                fact_id = existing[0]
+            else:
+                cursor.execute("""
+                    INSERT INTO facts (id, category, value, importance, confidence,
+                                      source, timestamp, last_updated)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (fact_id, category, value, importance, confidence, source, timestamp, timestamp))
+
+            conn.commit()
+
+            return fact_id
     
     def get_fact(self, category: str) -> Optional[Dict]:
         """Retrieve a fact by category."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT id, category, value, importance, confidence, source, timestamp
-            FROM facts
-            WHERE category = ?
-        """, (category,))
-        
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row:
-            return {
-                "id": row[0],
-                "category": row[1],
-                "value": row[2],
-                "importance": row[3],
-                "confidence": row[4],
-                "source": row[5],
-                "timestamp": row[6]
-            }
-        return None
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT id, category, value, importance, confidence, source, timestamp
+                FROM facts
+                WHERE category = ?
+            """, (category,))
+
+            row = cursor.fetchone()
+
+            if row:
+                return {
+                    "id": row[0],
+                    "category": row[1],
+                    "value": row[2],
+                    "importance": row[3],
+                    "confidence": row[4],
+                    "source": row[5],
+                    "timestamp": row[6]
+                }
+            return None
     
     def get_all_facts(self, min_importance: int = 1) -> List[Dict]:
         """Get all facts above a certain importance."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT category, value, importance, confidence
-            FROM facts
-            WHERE importance >= ?
-            ORDER BY importance DESC, timestamp DESC
-        """, (min_importance,))
-        
-        facts = []
-        for row in cursor.fetchall():
-            facts.append({
-                "category": row[0],
-                "value": row[1],
-                "importance": row[2],
-                "confidence": row[3]
-            })
-        
-        conn.close()
-        return facts
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT category, value, importance, confidence
+                FROM facts
+                WHERE importance >= ?
+                ORDER BY importance DESC, timestamp DESC
+            """, (min_importance,))
+
+            facts = []
+            for row in cursor.fetchall():
+                facts.append({
+                    "category": row[0],
+                    "value": row[1],
+                    "importance": row[2],
+                    "confidence": row[3]
+                })
+
+            return facts
     
     def search_memories(self, query: str, limit: int = 5) -> List[Dict]:
         """
         Simple text search in memories.
         (For better semantic search, use with embeddings separately)
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT id, role, content, memory_type, importance, timestamp
-            FROM memories
-            WHERE content LIKE ?
-            ORDER BY importance DESC, timestamp DESC
-            LIMIT ?
-        """, (f"%{query}%", limit))
-        
-        memories = []
-        for row in cursor.fetchall():
-            memories.append({
-                "id": row[0],
-                "role": row[1],
-                "content": row[2],
-                "type": row[3],
-                "importance": row[4],
-                "timestamp": row[5]
-            })
-        
-        conn.close()
-        return memories
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT id, role, content, memory_type, importance, timestamp
+                FROM memories
+                WHERE content LIKE ?
+                ORDER BY importance DESC, timestamp DESC
+                LIMIT ?
+            """, (f"%{query}%", limit))
+
+            memories = []
+            for row in cursor.fetchall():
+                memories.append({
+                    "id": row[0],
+                    "role": row[1],
+                    "content": row[2],
+                    "type": row[3],
+                    "importance": row[4],
+                    "timestamp": row[5]
+                })
+
+            return memories
     
     def create_relationship(self, memory_id_1: str, memory_id_2: str, 
                            relationship_type: str = "related", strength: float = 0.5) -> str:
@@ -371,130 +388,129 @@ class AdaptiveMemory:
         Create a relationship between two memories.
         Useful for building knowledge graphs.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        rel_id = str(uuid.uuid4())
-        
-        cursor.execute("""
-            INSERT INTO relationships (id, memory_id_1, memory_id_2, relationship_type, strength)
-            VALUES (?, ?, ?, ?, ?)
-        """, (rel_id, memory_id_1, memory_id_2, relationship_type, strength))
-        
-        conn.commit()
-        conn.close()
-        
-        return rel_id
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+
+            rel_id = str(uuid.uuid4())
+
+            cursor.execute("""
+                INSERT INTO relationships (id, memory_id_1, memory_id_2, relationship_type, strength)
+                VALUES (?, ?, ?, ?, ?)
+            """, (rel_id, memory_id_1, memory_id_2, relationship_type, strength))
+
+            conn.commit()
+
+            return rel_id
     
     def get_related_memories(self, memory_id: str) -> List[Dict]:
         """Get all memories related to a given memory."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT m.id, m.content, m.importance, r.relationship_type, r.strength
-            FROM memories m
-            JOIN relationships r ON (m.id = r.memory_id_2)
-            WHERE r.memory_id_1 = ?
-            ORDER BY r.strength DESC
-        """, (memory_id,))
-        
-        related = []
-        for row in cursor.fetchall():
-            related.append({
-                "id": row[0],
-                "content": row[1],
-                "importance": row[2],
-                "relationship": row[3],
-                "strength": row[4]
-            })
-        
-        conn.close()
-        return related
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT m.id, m.content, m.importance, r.relationship_type, r.strength
+                FROM memories m
+                JOIN relationships r ON (m.id = r.memory_id_2)
+                WHERE r.memory_id_1 = ?
+                ORDER BY r.strength DESC
+            """, (memory_id,))
+
+            related = []
+            for row in cursor.fetchall():
+                related.append({
+                    "id": row[0],
+                    "content": row[1],
+                    "importance": row[2],
+                    "relationship": row[3],
+                    "strength": row[4]
+                })
+
+            return related
     
     def get_statistics(self) -> Dict:
         """Get memory system statistics."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Count memories by type
-        cursor.execute("SELECT memory_type, COUNT(*) FROM memories GROUP BY memory_type")
-        type_counts = dict(cursor.fetchall())
-        
-        # Count facts
-        cursor.execute("SELECT COUNT(*) FROM facts")
-        fact_count = cursor.fetchone()[0]
-        
-        # Average importance
-        cursor.execute("SELECT AVG(importance) FROM memories")
-        avg_importance = cursor.fetchone()[0] or 0
-        
-        # High importance count
-        cursor.execute("SELECT COUNT(*) FROM memories WHERE importance >= 8")
-        critical_count = cursor.fetchone()[0]
-        
-        conn.close()
-        
-        return {
-            "total_memories": sum(type_counts.values()),
-            "memories_by_type": type_counts,
-            "total_facts": fact_count,
-            "average_importance": round(avg_importance, 2),
-            "critical_memories": critical_count
-        }
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+
+            # Count memories by type
+            cursor.execute("SELECT memory_type, COUNT(*) FROM memories GROUP BY memory_type")
+            type_counts = dict(cursor.fetchall())
+
+            # Count facts
+            cursor.execute("SELECT COUNT(*) FROM facts")
+            fact_count = cursor.fetchone()[0]
+
+            # Average importance
+            cursor.execute("SELECT AVG(importance) FROM memories")
+            avg_importance = cursor.fetchone()[0] or 0
+
+            # High importance count
+            cursor.execute("SELECT COUNT(*) FROM memories WHERE importance >= 8")
+            critical_count = cursor.fetchone()[0]
+
+            return {
+                "total_memories": sum(type_counts.values()),
+                "memories_by_type": type_counts,
+                "total_facts": fact_count,
+                "average_importance": round(avg_importance, 2),
+                "critical_memories": critical_count
+            }
     
     def clear_low_importance(self, threshold: int = 3):
         """Remove memories below importance threshold (cleanup)."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            DELETE FROM memories
-            WHERE importance < ? AND decay_factor < 0.5
-        """, (threshold,))
-        
-        deleted = cursor.rowcount
-        conn.commit()
-        conn.close()
-        
-        return deleted
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                DELETE FROM memories
+                WHERE importance < ? AND decay_factor < 0.5
+            """, (threshold,))
+
+            deleted = cursor.rowcount
+            conn.commit()
+
+            return deleted
 
     def clear_personal(self) -> Dict:
         """Clear personal facts and any personal-type memories."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
 
-        # Clear structured facts
-        cursor.execute("DELETE FROM facts")
-        facts_deleted = cursor.rowcount
+            # Clear structured facts
+            cursor.execute("DELETE FROM facts")
+            facts_deleted = cursor.rowcount
 
-        # Clear memories explicitly marked as personal
-        cursor.execute(
-            "DELETE FROM memories WHERE memory_type = ?",
-            ("personal",),
-        )
-        memories_deleted = cursor.rowcount
+            # Clear memories explicitly marked as personal
+            cursor.execute(
+                "DELETE FROM memories WHERE memory_type = ?",
+                ("personal",),
+            )
+            memories_deleted = cursor.rowcount
 
-        conn.commit()
-        conn.close()
+            conn.commit()
 
-        return {
-            "cleared_facts": facts_deleted if facts_deleted is not None else 0,
-            "cleared_personal_memories": memories_deleted if memories_deleted is not None else 0,
-        }
+            return {
+                "cleared_facts": facts_deleted if facts_deleted is not None else 0,
+                "cleared_personal_memories": memories_deleted if memories_deleted is not None else 0,
+            }
 
     def clear_conversation(self) -> int:
         """Clear conversation-type memories (chat history)."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        with self.lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
 
-        cursor.execute(
-            "DELETE FROM memories WHERE memory_type = ?",
-            ("conversation",),
-        )
-        deleted = cursor.rowcount or 0
+            cursor.execute(
+                "DELETE FROM memories WHERE memory_type = ?",
+                ("conversation",),
+            )
+            deleted = cursor.rowcount or 0
 
-        conn.commit()
-        conn.close()
+            conn.commit()
 
-        return deleted
+            return deleted
