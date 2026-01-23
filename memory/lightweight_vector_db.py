@@ -75,6 +75,11 @@ class HNSWIndex:
         self.graph = {}  # Simplified graph structure
         self.data = {}   # Vector data
         self.metadata = {}  # Associated metadata
+
+        # Cache for vectorized search
+        self.vectors_matrix = np.empty((0, dimension), dtype=np.float32)
+        self.ids = []
+        self.dirty = False
     
     def add(self, idx: int, vector: np.ndarray, metadata: Dict = None):
         """Add vector to index"""
@@ -82,24 +87,56 @@ class HNSWIndex:
         self.data[idx] = vector
         if metadata:
             self.metadata[idx] = metadata
+        self.dirty = True
     
+    def _rebuild_index(self):
+        """Rebuild numpy matrix for vectorized search"""
+        self.ids = list(self.data.keys())
+        if not self.ids:
+            self.vectors_matrix = np.empty((0, self.dimension), dtype=np.float32)
+        else:
+            matrix = np.array([self.data[i] for i in self.ids], dtype=np.float32)
+            # Ensure vectors are normalized for cosine similarity (dot product of unit vectors)
+            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0  # Avoid division by zero
+            self.vectors_matrix = matrix / norms
+        self.dirty = False
+
     def search(self, query_vector: np.ndarray, k: int = 5) -> List[Tuple[int, float]]:
         """Search for k nearest neighbors"""
         if not self.data:
             return []
         
-        # Compute distances to all vectors
-        distances = []
-        for idx, vector in self.data.items():
-            # Cosine distance
-            dist = 1 - np.dot(query_vector, vector) / (
-                np.linalg.norm(query_vector) * np.linalg.norm(vector) + 1e-8
-            )
-            distances.append((idx, dist))
+        if self.dirty:
+            self._rebuild_index()
+
+        # Normalize query vector
+        q_norm = np.linalg.norm(query_vector)
+        if q_norm > 1e-8:
+            query_vector = query_vector / q_norm
+
+        # Vectorized cosine similarity
+        scores = np.dot(self.vectors_matrix, query_vector)
+
+        # Get top k indices (largest scores)
+        # argpartition is faster than argsort for large k, but k is small here so argsort is fine
+        if len(scores) <= k:
+            top_k_indices = np.argsort(scores)[::-1]
+        else:
+            # efficient way to get top k
+            top_k_indices = np.argpartition(scores, -k)[-k:]
+            # sort only the top k
+            top_k_indices = top_k_indices[np.argsort(scores[top_k_indices])[::-1]]
         
-        # Sort by distance and return top k
-        distances.sort(key=lambda x: x[1])
-        return distances[:k]
+        results = []
+        for idx_in_matrix in top_k_indices:
+            real_idx = self.ids[idx_in_matrix]
+            # Convert score (cosine sim) to distance (1 - cosine sim)
+            # Ensure distance is non-negative
+            dist = max(0.0, 1.0 - float(scores[idx_in_matrix]))
+            results.append((real_idx, dist))
+
+        return results
 
 
 class LightweightVectorDB:
