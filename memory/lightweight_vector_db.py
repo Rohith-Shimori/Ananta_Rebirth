@@ -75,6 +75,11 @@ class HNSWIndex:
         self.graph = {}  # Simplified graph structure
         self.data = {}   # Vector data
         self.metadata = {}  # Associated metadata
+
+        # Vectorized cache
+        self.vectors_matrix = None
+        self.ids_list = []
+        self.dirty = False
     
     def add(self, idx: int, vector: np.ndarray, metadata: Dict = None):
         """Add vector to index"""
@@ -82,24 +87,93 @@ class HNSWIndex:
         self.data[idx] = vector
         if metadata:
             self.metadata[idx] = metadata
+        self.dirty = True
+
+    def _rebuild_index(self):
+        """Rebuild the vectorized index"""
+        if not self.data:
+            self.vectors_matrix = None
+            self.ids_list = []
+            return
+
+        self.ids_list = []
+        vectors = []
+        for k, v in self.data.items():
+            self.ids_list.append(k)
+            vectors.append(v if isinstance(v, np.ndarray) else np.array(v))
+
+        try:
+            if not vectors:
+                return
+
+            matrix = np.stack(vectors)
+
+            # Normalize matrix rows
+            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+            # Avoid division by zero
+            norms[norms == 0] = 1.0
+            self.vectors_matrix = matrix / norms
+
+            self.dirty = False
+        except Exception as e:
+            print(f"Error rebuilding index: {e}")
+            self.vectors_matrix = None
+            self.ids_list = []
     
     def search(self, query_vector: np.ndarray, k: int = 5) -> List[Tuple[int, float]]:
         """Search for k nearest neighbors"""
         if not self.data:
             return []
-        
-        # Compute distances to all vectors
-        distances = []
-        for idx, vector in self.data.items():
-            # Cosine distance
-            dist = 1 - np.dot(query_vector, vector) / (
-                np.linalg.norm(query_vector) * np.linalg.norm(vector) + 1e-8
-            )
-            distances.append((idx, dist))
-        
-        # Sort by distance and return top k
-        distances.sort(key=lambda x: x[1])
-        return distances[:k]
+
+        if self.dirty or self.vectors_matrix is None:
+            self._rebuild_index()
+
+        if self.vectors_matrix is None:
+            # Fallback to empty if rebuild failed
+            return []
+
+        # Normalize query vector
+        query_norm = np.linalg.norm(query_vector)
+        if query_norm > 0:
+            query_vector = query_vector / query_norm
+
+        # Compute cosine similarity (dot product of normalized vectors)
+        # Result shape: (num_vectors,)
+        try:
+            scores = self.vectors_matrix @ query_vector
+
+            # Convert to distances (1 - similarity)
+            distances = 1 - scores
+
+            # Get top k indices
+            num_vectors = len(distances)
+            k = min(k, num_vectors)
+
+            if k == 0:
+                return []
+
+            if k >= num_vectors:
+                # If we need all or more, just sort all
+                top_k_indices = np.argsort(distances)
+            else:
+                # argpartition is faster for top k
+                # It puts the smallest k elements in the first k positions (unsorted)
+                partitioned_indices = np.argpartition(distances, k)[:k]
+                # Now sort these indices based on their distance
+                # We want indices that sort the *subset* of distances
+                subset_indices = np.argsort(distances[partitioned_indices])
+                top_k_indices = partitioned_indices[subset_indices]
+
+            results = []
+            for i in top_k_indices:
+                idx = self.ids_list[i]
+                dist = float(distances[i])
+                results.append((idx, dist))
+
+            return results
+        except Exception as e:
+            print(f"Error in vectorized search: {e}")
+            return []
 
 
 class LightweightVectorDB:
