@@ -14,6 +14,10 @@ class OllamaClient:
         self.generate_url = f"{self.base_url}/api/generate"
         self.chat_url = f"{self.base_url}/api/chat"
         
+        # Initialize persistent session for performance
+        # ⚡ Bolt Optimization: Reuse TCP connection
+        self.session = requests.Session()
+
         # Configure GPU settings
         import torch
         self.gpu_available = torch.cuda.is_available()
@@ -60,7 +64,7 @@ class OllamaClient:
                 "repeat_penalty": self.gpu_settings["repeat_penalty"],
             }
             
-            resp = requests.post(
+            resp = self.session.post(
                 self.chat_url,
                 json={
                     "model": self.model,
@@ -109,7 +113,7 @@ class OllamaClient:
             retries = 3
             for attempt in range(retries):
                 try:
-                    resp = requests.post(
+                    resp = self.session.post(
                         self.generate_url,
                         json={
                             "model": self.model,
@@ -167,7 +171,7 @@ class OllamaClient:
                 {"role": "user", "content": user_message}
             ]
             
-            resp = requests.post(
+            resp = self.session.post(
                 self.chat_url,
                 json={
                     "model": self.model,
@@ -207,14 +211,14 @@ class OllamaClient:
                 max_tokens = min(max(max_tokens, 256), 1024)
                 
             # Configure keepalive and chunk size for smoother streaming
-            session = requests.Session()
-            session.headers.update({
+            # Bolt Optimization: Use shared session but add specific headers
+            headers = {
                 'Connection': 'keep-alive',
                 'Accept': 'text/event-stream',
                 'Cache-Control': 'no-cache'
-            })
+            }
             
-            resp = session.post(
+            resp = self.session.post(
                 self.generate_url,
                 json={
                     "model": self.model,
@@ -232,6 +236,7 @@ class OllamaClient:
                     },
                     "stream": True
                 },
+                headers=headers,
                 stream=True,
                 timeout=180
             )
@@ -257,8 +262,7 @@ class OllamaClient:
 
         except Exception as e:
             yield f"ERROR: {e}"
-        finally:
-            session.close()
+        # Session is persistent, no need to close
     
     def chat(
         self,
@@ -267,7 +271,7 @@ class OllamaClient:
         temperature: float = 0.3
     ) -> str:
         try:
-            resp = requests.post(
+            resp = self.session.post(
                 self.chat_url,
                 json={
                     "model": self.model,
@@ -289,4 +293,3 @@ class OllamaClient:
             return "ERROR: No response from model"
         except Exception as e:
             return f"ERROR: {e}"
-
