@@ -75,6 +75,11 @@ class HNSWIndex:
         self.graph = {}  # Simplified graph structure
         self.data = {}   # Vector data
         self.metadata = {}  # Associated metadata
+
+        # Optimization: Vectorized search
+        self.matrix = None
+        self.ids_array = None
+        self.dirty = False
     
     def add(self, idx: int, vector: np.ndarray, metadata: Dict = None):
         """Add vector to index"""
@@ -82,24 +87,71 @@ class HNSWIndex:
         self.data[idx] = vector
         if metadata:
             self.metadata[idx] = metadata
+        self.dirty = True
     
+    def _rebuild_index(self):
+        """Rebuild NumPy matrix for vectorized search"""
+        if not self.data:
+            self.matrix = np.zeros((0, self.dimension), dtype=np.float32)
+            self.ids_array = np.array([], dtype=int)
+            return
+
+        # Create matrix from data
+        # Ensure consistent ordering
+        ids = list(self.data.keys())
+        vectors = list(self.data.values())
+
+        self.ids_array = np.array(ids)
+
+        # Stack vectors
+        raw_matrix = np.stack(vectors)
+
+        # Normalize matrix rows to ensure correct cosine similarity
+        # (This protects against un-normalized inputs)
+        norms = np.linalg.norm(raw_matrix, axis=1, keepdims=True)
+        # Avoid division by zero
+        norms[norms < 1e-8] = 1.0
+        self.matrix = raw_matrix / norms
+
+        self.dirty = False
+
     def search(self, query_vector: np.ndarray, k: int = 5) -> List[Tuple[int, float]]:
-        """Search for k nearest neighbors"""
+        """Search for k nearest neighbors using vectorized operations"""
         if not self.data:
             return []
         
-        # Compute distances to all vectors
-        distances = []
-        for idx, vector in self.data.items():
-            # Cosine distance
-            dist = 1 - np.dot(query_vector, vector) / (
-                np.linalg.norm(query_vector) * np.linalg.norm(vector) + 1e-8
-            )
-            distances.append((idx, dist))
+        # Rebuild index if needed
+        if self.dirty or self.matrix is None:
+            self._rebuild_index()
+
+        # Vectorized cosine similarity
+        # Assumption: self.matrix vectors are normalized (handled by EmbeddingModel)
+        # We ensure query_vector is normalized here just in case, though usually caller does it
+        query_norm = np.linalg.norm(query_vector)
+        if query_norm > 1e-8:
+            query_vector = query_vector / query_norm
+
+        # Matrix multiplication: (N, D) @ (D,) -> (N,)
+        scores = np.dot(self.matrix, query_vector)
         
-        # Sort by distance and return top k
-        distances.sort(key=lambda x: x[1])
-        return distances[:k]
+        # We want top k scores (highest similarity = lowest distance)
+        # For small k, argsort is fast enough.
+        # For large N and small k, argpartition would be better but argsort is safe.
+        if len(scores) <= k:
+            top_indices = np.argsort(scores)[::-1]
+        else:
+            # Sort all for simplicity and guaranteed order
+            top_indices = np.argsort(scores)[-k:][::-1]
+
+        results = []
+        for idx_idx in top_indices:
+            real_id = self.ids_array[idx_idx]
+            score = scores[idx_idx]
+            # Convert similarity to distance (1 - similarity)
+            dist = 1.0 - score
+            results.append((real_id, float(dist)))
+
+        return results
 
 
 class LightweightVectorDB:
