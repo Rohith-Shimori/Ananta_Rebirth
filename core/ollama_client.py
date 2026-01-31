@@ -34,6 +34,12 @@ class OllamaClient:
             print(f"   - Memory Mapping: {self.gpu_settings['use_mmap']}")
             print(f"   - Memory Lock: {self.gpu_settings['use_mlock']}")
 
+        # Initialize persistent session for better performance
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Connection": "keep-alive"
+        })
+
     def generate_with_system(
         self, 
         system_prompt: str, 
@@ -60,7 +66,7 @@ class OllamaClient:
                 "repeat_penalty": self.gpu_settings["repeat_penalty"],
             }
             
-            resp = requests.post(
+            resp = self.session.post(
                 self.chat_url,
                 json={
                     "model": self.model,
@@ -109,7 +115,7 @@ class OllamaClient:
             retries = 3
             for attempt in range(retries):
                 try:
-                    resp = requests.post(
+                    resp = self.session.post(
                         self.generate_url,
                         json={
                             "model": self.model,
@@ -167,7 +173,7 @@ class OllamaClient:
                 {"role": "user", "content": user_message}
             ]
             
-            resp = requests.post(
+            with self.session.post(
                 self.chat_url,
                 json={
                     "model": self.model,
@@ -182,19 +188,19 @@ class OllamaClient:
                 },
                 stream=True,
                 timeout=120
-            )
+            ) as resp:
             
-            for line in resp.iter_lines():
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line.decode("utf-8"))
-                except Exception:
-                    continue
-                if "message" in data and "content" in data["message"]:
-                    yield data["message"]["content"]
-                if data.get("done", False):
-                    break
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line.decode("utf-8"))
+                    except Exception:
+                        continue
+                    if "message" in data and "content" in data["message"]:
+                        yield data["message"]["content"]
+                    if data.get("done", False):
+                        break
         except Exception as e:
             yield f"ERROR: {e}"
 
@@ -207,14 +213,13 @@ class OllamaClient:
                 max_tokens = min(max(max_tokens, 256), 1024)
                 
             # Configure keepalive and chunk size for smoother streaming
-            session = requests.Session()
-            session.headers.update({
+            stream_headers = {
                 'Connection': 'keep-alive',
                 'Accept': 'text/event-stream',
                 'Cache-Control': 'no-cache'
-            })
+            }
             
-            resp = session.post(
+            with self.session.post(
                 self.generate_url,
                 json={
                     "model": self.model,
@@ -232,33 +237,32 @@ class OllamaClient:
                     },
                     "stream": True
                 },
+                headers=stream_headers,
                 stream=True,
                 timeout=180
-            )
+            ) as resp:
 
-            for line in resp.iter_lines():
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line.decode("utf-8"))
-                    if "response" in data:
-                        chunk = data["response"]
-                        # Stream raw chunks directly so the UI can update as fast
-                        # as the model sends tokens/segments.
-                        if chunk:
-                            yield chunk
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line.decode("utf-8"))
+                        if "response" in data:
+                            chunk = data["response"]
+                            # Stream raw chunks directly so the UI can update as fast
+                            # as the model sends tokens/segments.
+                            if chunk:
+                                yield chunk
 
-                    if data.get("done", False):
-                        break
+                        if data.get("done", False):
+                            break
 
-                except Exception as e:
-                    print(f"Streaming error: {e}")
-                    continue
+                    except Exception as e:
+                        print(f"Streaming error: {e}")
+                        continue
 
         except Exception as e:
             yield f"ERROR: {e}"
-        finally:
-            session.close()
     
     def chat(
         self,
@@ -267,7 +271,7 @@ class OllamaClient:
         temperature: float = 0.3
     ) -> str:
         try:
-            resp = requests.post(
+            resp = self.session.post(
                 self.chat_url,
                 json={
                     "model": self.model,
