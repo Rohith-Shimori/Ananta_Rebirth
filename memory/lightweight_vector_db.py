@@ -67,7 +67,10 @@ class QuantizedEmbedding:
 
 
 class HNSWIndex:
-    """Hierarchical Navigable Small World (HNSW) index for fast search"""
+    """
+    Vectorized flat index for fast search.
+    Maintains a cached numpy matrix for bulk operations.
+    """
     
     def __init__(self, dimension: int = 384, max_m: int = 16):
         self.dimension = dimension
@@ -75,6 +78,11 @@ class HNSWIndex:
         self.graph = {}  # Simplified graph structure
         self.data = {}   # Vector data
         self.metadata = {}  # Associated metadata
+
+        # Optimization: Vectorized cache
+        self.vectors_matrix = None
+        self.ids_list = []
+        self.dirty = False
     
     def add(self, idx: int, vector: np.ndarray, metadata: Dict = None):
         """Add vector to index"""
@@ -82,24 +90,64 @@ class HNSWIndex:
         self.data[idx] = vector
         if metadata:
             self.metadata[idx] = metadata
+        self.dirty = True
+
+    def _rebuild_index(self):
+        """Rebuild the vectorized index"""
+        if not self.data:
+            self.vectors_matrix = None
+            self.ids_list = []
+            return
+
+        self.ids_list = list(self.data.keys())
+        vectors = list(self.data.values())
+        self.vectors_matrix = np.stack(vectors)
+
+        # Normalize vectors for correct cosine similarity
+        norm = np.linalg.norm(self.vectors_matrix, axis=1, keepdims=True)
+        self.vectors_matrix = self.vectors_matrix / (norm + 1e-8)
+
+        self.dirty = False
     
     def search(self, query_vector: np.ndarray, k: int = 5) -> List[Tuple[int, float]]:
-        """Search for k nearest neighbors"""
+        """Search for k nearest neighbors using vectorized operations"""
         if not self.data:
             return []
+
+        if self.dirty or self.vectors_matrix is None:
+            self._rebuild_index()
+
+        if self.vectors_matrix is None:
+            return []
+
+        # Normalize query vector
+        q_norm = np.linalg.norm(query_vector)
+        if q_norm > 1e-8:
+            query_vector = query_vector / q_norm
+
+        # Compute cosine similarities (dot product of normalized vectors)
+        # Shape: (N,)
+        scores = np.dot(self.vectors_matrix, query_vector)
         
-        # Compute distances to all vectors
-        distances = []
-        for idx, vector in self.data.items():
-            # Cosine distance
-            dist = 1 - np.dot(query_vector, vector) / (
-                np.linalg.norm(query_vector) * np.linalg.norm(vector) + 1e-8
-            )
-            distances.append((idx, dist))
+        # Convert to distance (1 - similarity)
+        distances = 1 - scores
         
-        # Sort by distance and return top k
-        distances.sort(key=lambda x: x[1])
-        return distances[:k]
+        # Get top k indices (argsort sorts ascending)
+        if len(distances) <= k:
+            top_indices = np.argsort(distances)
+        else:
+            # partitioning is faster than full sort for large N
+            top_indices = np.argpartition(distances, k)[:k]
+            # sort the top k
+            top_indices = top_indices[np.argsort(distances[top_indices])]
+
+        results = []
+        for idx in top_indices:
+            real_id = self.ids_list[idx]
+            dist = float(distances[idx])
+            results.append((real_id, dist))
+
+        return results
 
 
 class LightweightVectorDB:
@@ -268,9 +316,7 @@ class LightweightVectorDB:
 
 # Example usage
 if __name__ == "__main__":
-    import asyncio
-    
-    async def main():
+    def main():
         db = LightweightVectorDB()
         
         print("🚀 LIGHTWEIGHT VECTOR DATABASE - TEST\n")
@@ -286,13 +332,13 @@ if __name__ == "__main__":
         
         print("📝 STORING DOCUMENTS:")
         for text, metadata in documents:
-            vector_id = await db.store_and_index(text, metadata)
+            vector_id = db.store_and_index(text, metadata)
             print(f"  [{vector_id}] {text[:40]}...")
         
         # Test search
         print("\n🔍 SEARCHING:")
         query = "programming languages"
-        results = await db.search(query, k=3)
+        results = db.search(query, k=3)
         print(f"Query: '{query}'")
         for result in results:
             print(f"  Distance: {result['distance']:.3f} | {result['metadata']}")
@@ -300,4 +346,4 @@ if __name__ == "__main__":
         # Print stats
         db.print_stats()
     
-    asyncio.run(main())
+    main()
