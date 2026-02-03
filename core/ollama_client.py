@@ -19,6 +19,12 @@ class OllamaClient:
         self.gpu_available = torch.cuda.is_available()
         self.gpu_layers = -1 if self.gpu_available else 0  # Use all GPU layers if available
         
+        # Initialize persistent session
+        self.session = requests.Session()
+        self.session.headers.update({
+            'Connection': 'keep-alive'
+        })
+
         # ====================================================================
         # RTX 4050 OPTIMIZATION SETTINGS (Claude's Plan)
         # ====================================================================
@@ -60,7 +66,7 @@ class OllamaClient:
                 "repeat_penalty": self.gpu_settings["repeat_penalty"],
             }
             
-            resp = requests.post(
+            resp = self.session.post(
                 self.chat_url,
                 json={
                     "model": self.model,
@@ -109,7 +115,7 @@ class OllamaClient:
             retries = 3
             for attempt in range(retries):
                 try:
-                    resp = requests.post(
+                    resp = self.session.post(
                         self.generate_url,
                         json={
                             "model": self.model,
@@ -167,7 +173,7 @@ class OllamaClient:
                 {"role": "user", "content": user_message}
             ]
             
-            resp = requests.post(
+            resp = self.session.post(
                 self.chat_url,
                 json={
                     "model": self.model,
@@ -207,14 +213,9 @@ class OllamaClient:
                 max_tokens = min(max(max_tokens, 256), 1024)
                 
             # Configure keepalive and chunk size for smoother streaming
-            session = requests.Session()
-            session.headers.update({
-                'Connection': 'keep-alive',
-                'Accept': 'text/event-stream',
-                'Cache-Control': 'no-cache'
-            })
+            # Using shared session for connection reuse
             
-            resp = session.post(
+            resp = self.session.post(
                 self.generate_url,
                 json={
                     "model": self.model,
@@ -231,6 +232,10 @@ class OllamaClient:
                         "num_thread": 8 if not self.gpu_available else 4
                     },
                     "stream": True
+                },
+                headers={
+                    'Accept': 'text/event-stream',
+                    'Cache-Control': 'no-cache'
                 },
                 stream=True,
                 timeout=180
@@ -257,8 +262,6 @@ class OllamaClient:
 
         except Exception as e:
             yield f"ERROR: {e}"
-        finally:
-            session.close()
     
     def chat(
         self,
@@ -267,7 +270,7 @@ class OllamaClient:
         temperature: float = 0.3
     ) -> str:
         try:
-            resp = requests.post(
+            resp = self.session.post(
                 self.chat_url,
                 json={
                     "model": self.model,
@@ -290,3 +293,14 @@ class OllamaClient:
         except Exception as e:
             return f"ERROR: {e}"
 
+    def close(self):
+        """Close the session"""
+        if self.session:
+            self.session.close()
+
+    def __del__(self):
+        """Ensure session is closed on deletion"""
+        try:
+            self.close()
+        except:
+            pass
