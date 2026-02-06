@@ -82,6 +82,9 @@ class ContextWindowManager:
         
         return self.windows[model].available_for_context
     
+    # Class-level constant for faster access
+    IMPORTANT_MARKERS = {"important", "key", "critical", "must", "note", "remember"}
+
     def compress_context(self, context: str, model: str, target_ratio: float = 0.7) -> Tuple[str, float]:
         """
         Compress context while preserving important facts
@@ -97,38 +100,55 @@ class ContextWindowManager:
         if not context:
             return "", 1.0
         
-        original_tokens = len(context.split())
-        
-        # Extract important sentences (those with key markers)
-        important_markers = ["important", "key", "critical", "must", "note", "remember"]
+        # Optimize: Single pass splitting
         lines = context.split('\n')
         
         important_lines = []
-        other_lines = []
+        other_lines_data = [] # Store tuples of (line, token_count)
         
+        important_tokens_count = 0
+        other_tokens_count = 0
+
+        # Optimize: Single pass to classify and count tokens
         for line in lines:
-            if any(marker in line.lower() for marker in important_markers):
+            tokens = line.split()
+            token_count = len(tokens)
+
+            line_lower = line.lower()
+            if any(marker in line_lower for marker in self.IMPORTANT_MARKERS):
                 important_lines.append(line)
+                important_tokens_count += token_count
             else:
-                other_lines.append(line)
+                other_lines_data.append((line, token_count))
+                other_tokens_count += token_count
         
-        # Keep all important lines, sample others
+        original_tokens = important_tokens_count + other_tokens_count
         target_tokens = int(original_tokens * target_ratio)
-        important_tokens = len(' '.join(important_lines).split())
         
-        remaining_tokens = target_tokens - important_tokens
-        if remaining_tokens > 0 and other_lines:
-            # Sample other lines proportionally
-            sample_size = max(1, int(len(other_lines) * (remaining_tokens / len(' '.join(other_lines).split()))))
-            sampled_lines = other_lines[:sample_size]
-        else:
-            sampled_lines = []
+        remaining_tokens = target_tokens - important_tokens_count
         
+        sampled_lines = []
+        sampled_tokens_count = 0
+
+        if remaining_tokens > 0 and other_lines_data:
+            if other_tokens_count > 0:
+                # Calculate ratio based on token counts we already have
+                ratio = remaining_tokens / other_tokens_count
+                sample_size = max(1, int(len(other_lines_data) * ratio))
+            else:
+                sample_size = 0
+
+            # Select lines and sum their tokens
+            selected_data = other_lines_data[:sample_size]
+            sampled_lines = [x[0] for x in selected_data]
+            sampled_tokens_count = sum(x[1] for x in selected_data)
+
         # Combine
-        compressed = '\n'.join(important_lines + sampled_lines)
+        final_lines = important_lines + sampled_lines
+        compressed = '\n'.join(final_lines)
         
         # Calculate actual ratio
-        compressed_tokens = len(compressed.split())
+        compressed_tokens = important_tokens_count + sampled_tokens_count
         actual_ratio = compressed_tokens / original_tokens if original_tokens > 0 else 1.0
         
         # Update stats
